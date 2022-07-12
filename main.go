@@ -16,18 +16,18 @@ var upgrader = websocket.Upgrader{
 }
 
 /// Append a new connection.
-func (c *DataPasser) add(cs ClientServer) {
-	c.Connections = append(c.Connections, cs)
+func (dp *DataPasser) add(cs ClientServer) {
+	dp.Connections = append(dp.Connections, cs)
 }
-func (c *DataPasser) addServer(id string, conn *websocket.Conn) {
-	_, connection, index := c.find(id)
+func (dp *DataPasser) addServer(id string, conn *websocket.Conn) {
+	_, connection, index := dp.find(id)
 	connection.server = conn
-	c.Connections[index] = *connection
+	dp.Connections[index] = *connection
 }
 
 /// Find the Connections by the key.
-func (c *DataPasser) find(key string) (error, *ClientServer, int) {
-	for i, c := range c.Connections {
+func (dp *DataPasser) find(key string) (error, *ClientServer, int) {
+	for i, c := range dp.Connections {
 		if c.clientKey == key {
 			return nil, &c, i
 		}
@@ -36,10 +36,10 @@ func (c *DataPasser) find(key string) (error, *ClientServer, int) {
 }
 
 /// Add a client
-func (c *DataPasser) addClient(key string, conn *websocket.Conn) {
-	_, connection, index := c.find(key)
+func (dp *DataPasser) addClient(key string, conn *websocket.Conn) {
+	_, connection, index := dp.find(key)
 	connection.client = conn
-	c.Connections[index] = *connection
+	dp.Connections[index] = *connection
 }
 
 type message struct {
@@ -48,9 +48,15 @@ type message struct {
 	Data    map[string]string `json:"data"`
 }
 
+type Broadcast struct {
+	clientKey string
+	Message   []byte
+}
+
 type DataPasser struct {
 	Channel     chan ClientServer
 	Connections []ClientServer
+	Broadcast   chan Broadcast
 }
 
 func (dp *DataPasser) wsEndpoint(w http.ResponseWriter, r *http.Request) {
@@ -77,6 +83,7 @@ func (dp *DataPasser) wsEndpoint(w http.ResponseWriter, r *http.Request) {
 		var m message
 		err = json.Unmarshal(p, &m)
 		if err != nil {
+			log.Println(err)
 			return
 		}
 		cs := ClientServer{}
@@ -85,27 +92,32 @@ func (dp *DataPasser) wsEndpoint(w http.ResponseWriter, r *http.Request) {
 			id := m.Data["key"]
 			cs.clientKey = id
 			cs.client = ws
-			spawn(true, id)
 			dp.Channel <- cs
 		}
 		if m.State == "REGISTERING_RECORDING" {
 			cs.clientKey = m.Data["key"]
 			cs.server = ws
 			fmt.Println(m.Data)
-			m := message{State: "START_RECORDING"}
-			bytes, err := json.Marshal(m)
-			if err != nil {
-				log.Println(err)
-			}
-			err = ws.WriteMessage(messageType, bytes)
-			if err != nil {
-				log.Println(err)
-			}
 			dp.Channel <- cs
 		}
 
 		if m.State == "RECORDING_STARTED" {
 			fmt.Println("Recording has been started in docker container")
+		}
+
+		if m.State == "BROADCAST" {
+			bytes, err := json.Marshal(map[string]string{"hello": "world", "state": "BROADCAST"})
+
+			if err != nil {
+				err := ws.WriteMessage(messageType, []byte("Your message is not a JSON object."))
+				if err != nil {
+					return
+				}
+			}
+			dp.Broadcast <- Broadcast{
+				clientKey: m.Data["key"],
+				Message:   bytes,
+			}
 		}
 
 	}
@@ -115,6 +127,7 @@ func main() {
 	dp := DataPasser{
 		Channel:     make(chan ClientServer),
 		Connections: []ClientServer{},
+		Broadcast:   make(chan Broadcast),
 	}
 	go dp.mergeConnections()
 	http.HandleFunc("/ws", dp.wsEndpoint)
@@ -126,14 +139,30 @@ func (dp *DataPasser) mergeConnections() {
 
 	for {
 		select {
+		case Broadcast := <-dp.Broadcast:
+			err, c, _ := dp.find(Broadcast.clientKey)
+			fmt.Println(err)
+			c.server.WriteMessage(1, Broadcast.Message)
+			c.client.WriteMessage(1, Broadcast.Message)
 		case conn := <-dp.Channel:
 			_, c, _ := dp.find(conn.clientKey)
 			if c == nil {
 				dp.add(conn)
+				go spawn(true, conn.clientKey)
 			} else {
 				// If the server is already registered this is probably the client.
-				if c.server != nil {
-					dp.addClient(conn.clientKey, conn.client)
+				if c.server == nil {
+					dp.addServer(conn.clientKey, conn.server)
+					/// Start
+					m := message{State: "START_RECORDING"}
+					bytes, err := json.Marshal(m)
+					if err != nil {
+						log.Println(err)
+					}
+					err = conn.server.WriteMessage(1, bytes)
+					if err != nil {
+						log.Println(err)
+					}
 				}
 			}
 			fmt.Println("The current size of the connections is: ", len(dp.Connections))

@@ -45,6 +45,7 @@ func spawn(local bool, id string) {
 		panic(err)
 	}
 
+	/// @todo use the dataPasser struct.
 	statusCh, errCh := cli.ContainerWait(ctx, resp.ID, container.WaitConditionNotRunning)
 	select {
 	case err := <-errCh:
