@@ -3,13 +3,12 @@ package main
 import (
 	"context"
 	"fmt"
-	"io"
-	"os"
-
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
+	"io"
+	"os"
 )
 
 func spawn(local bool, id string) {
@@ -26,7 +25,6 @@ func spawn(local bool, id string) {
 			panic(err)
 		}
 		io.Copy(os.Stdout, reader)
-
 	}
 	resp, err := cli.ContainerCreate(ctx, &container.Config{
 		Env:   []string{fmt.Sprintf("key=%s", id)},
@@ -53,7 +51,6 @@ func spawn(local bool, id string) {
 			panic(err)
 		}
 	case <-statusCh:
-
 	}
 
 	out, err := cli.ContainerLogs(ctx, resp.ID, types.ContainerLogsOptions{ShowStdout: true})

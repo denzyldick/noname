@@ -106,7 +106,7 @@ func (dp *DataPasser) wsEndpoint(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if m.State == "BROADCAST" {
-			bytes, err := json.Marshal(map[string]string{"hello": "world", "state": "BROADCAST"})
+			bytes, err := json.Marshal(m)
 
 			if err != nil {
 				err := ws.WriteMessage(messageType, []byte("Your message is not a JSON object."))
@@ -142,8 +142,14 @@ func (dp *DataPasser) mergeConnections() {
 		case Broadcast := <-dp.Broadcast:
 			err, c, _ := dp.find(Broadcast.clientKey)
 			fmt.Println(err)
-			c.server.WriteMessage(1, Broadcast.Message)
-			c.client.WriteMessage(1, Broadcast.Message)
+			err = c.server.WriteMessage(1, Broadcast.Message)
+			if err != nil {
+				return
+			}
+			err = c.client.WriteMessage(1, Broadcast.Message)
+			if err != nil {
+				return
+			}
 		case conn := <-dp.Channel:
 			_, c, _ := dp.find(conn.clientKey)
 			if c == nil {
