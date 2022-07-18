@@ -6,7 +6,6 @@ import (
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
-	"github.com/docker/docker/pkg/stdcopy"
 	"io"
 	"os"
 )
@@ -22,7 +21,7 @@ func spawn(local bool, id string) {
 	if local == false {
 		reader, err := cli.ImagePull(ctx, "recorder", types.ImagePullOptions{})
 		if err != nil {
-			panic(err)
+			fmt.Fprint(os.Stderr, err)
 		}
 		io.Copy(os.Stdout, reader)
 	}
@@ -36,7 +35,8 @@ func spawn(local bool, id string) {
 		},
 	}, nil, nil, "")
 	if err != nil {
-		panic(err)
+		fmt.Fprint(os.Stderr, err)
+
 	}
 
 	if err := cli.ContainerStart(ctx, resp.ID, types.ContainerStartOptions{}); err != nil {
@@ -52,11 +52,4 @@ func spawn(local bool, id string) {
 		}
 	case <-statusCh:
 	}
-
-	out, err := cli.ContainerLogs(ctx, resp.ID, types.ContainerLogsOptions{ShowStdout: true})
-	if err != nil {
-		panic(err)
-	}
-
-	stdcopy.StdCopy(os.Stdout, os.Stderr, out)
 }
