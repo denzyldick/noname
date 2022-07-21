@@ -43,9 +43,9 @@ func (dp *DataPasser) addClient(key string, conn *websocket.Conn) {
 }
 
 type message struct {
-	State   string            `json:"state"`
-	Message string            `json:"message"`
-	Data    map[string]string `json:"data"`
+	State   string                 `json:"state"`
+	Message string                 `json:"message"`
+	Data    map[string]interface{} `json:"data"`
 }
 
 type Broadcast struct {
@@ -89,13 +89,13 @@ func (dp *DataPasser) wsEndpoint(w http.ResponseWriter, r *http.Request) {
 		cs := ClientServer{}
 		if m.State == "REGISTERING_CLIENT" {
 			fmt.Println("Spawning new container")
-			id := m.Data["key"]
+			id := fmt.Sprint(m.Data["key"])
 			cs.clientKey = id
 			cs.client = ws
 			dp.Channel <- cs
 		}
 		if m.State == "REGISTERING_RECORDING" {
-			cs.clientKey = m.Data["key"]
+			cs.clientKey = fmt.Sprint(m.Data["key"])
 			cs.server = ws
 			fmt.Println(m.Data)
 			dp.Channel <- cs
@@ -115,7 +115,7 @@ func (dp *DataPasser) wsEndpoint(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			dp.Broadcast <- Broadcast{
-				clientKey: m.Data["key"],
+				clientKey: fmt.Sprint(m.Data["key"]),
 				Message:   bytes,
 			}
 		}
@@ -141,6 +141,7 @@ func (dp *DataPasser) mergeConnections() {
 		select {
 		case Broadcast := <-dp.Broadcast:
 			err, c, _ := dp.find(Broadcast.clientKey)
+			fmt.Println(string(Broadcast.Message))
 			fmt.Println(err)
 			err = c.server.WriteMessage(1, Broadcast.Message)
 			if err != nil {
