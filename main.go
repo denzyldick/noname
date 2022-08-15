@@ -15,17 +15,19 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin:     func(r *http.Request) bool { return true },
 }
 
-/// Append a new connection.
+// Append a new connection.
 func (dp *DataPasser) add(cs ClientServer) {
 	dp.Connections = append(dp.Connections, cs)
 }
+
+// Add a new client that should represent the server.
 func (dp *DataPasser) addServer(id string, conn *websocket.Conn) {
 	_, connection, index := dp.find(id)
 	connection.server = conn
 	dp.Connections[index] = *connection
 }
 
-/// Find the Connections by the key.
+// Find the Connections by the key.
 func (dp *DataPasser) find(key string) (error, *ClientServer, int) {
 	for i, c := range dp.Connections {
 		if c.clientKey == key {
@@ -35,7 +37,7 @@ func (dp *DataPasser) find(key string) (error, *ClientServer, int) {
 	return errors.New("no connection has been found"), nil, 0
 }
 
-/// Add a client
+// Add a client
 func (dp *DataPasser) addClient(key string, conn *websocket.Conn) {
 	_, connection, index := dp.find(key)
 	connection.client = conn
@@ -46,6 +48,11 @@ type message struct {
 	State   string                 `json:"state"`
 	Message string                 `json:"message"`
 	Data    map[string]interface{} `json:"data"`
+}
+
+// Get the key that represent a connection between a client and a server.
+func (m message) getKey() string {
+	return fmt.Sprint(m.Data["key"])
 }
 
 type Broadcast struct {
@@ -59,6 +66,7 @@ type DataPasser struct {
 	Broadcast   chan Broadcast
 }
 
+// The websocket endpoint.
 func (dp *DataPasser) wsEndpoint(w http.ResponseWriter, r *http.Request) {
 	ws, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -88,14 +96,14 @@ func (dp *DataPasser) wsEndpoint(w http.ResponseWriter, r *http.Request) {
 		}
 		cs := ClientServer{}
 		if m.State == "REGISTERING_CLIENT" {
-			fmt.Println("Spawning new container")
-			id := fmt.Sprint(m.Data["key"])
+			log.Println("Spawning new container")
+			id := m.getKey()
 			cs.clientKey = id
 			cs.client = ws
 			dp.Channel <- cs
 		}
 		if m.State == "REGISTERING_RECORDING" {
-			cs.clientKey = fmt.Sprint(m.Data["key"])
+			cs.clientKey = m.getKey()
 			cs.server = ws
 			fmt.Println(m.Data)
 			dp.Channel <- cs
@@ -115,7 +123,7 @@ func (dp *DataPasser) wsEndpoint(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			dp.Broadcast <- Broadcast{
-				clientKey: fmt.Sprint(m.Data["key"]),
+				clientKey: m.getKey(),
 				Message:   bytes,
 			}
 		}
@@ -124,6 +132,10 @@ func (dp *DataPasser) wsEndpoint(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	config := Config{
+		port: 8080,
+		host: "",
+	}
 	dp := DataPasser{
 		Channel:     make(chan ClientServer),
 		Connections: []ClientServer{},
@@ -131,18 +143,18 @@ func main() {
 	}
 	go dp.mergeConnections()
 	http.HandleFunc("/ws", dp.wsEndpoint)
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	log.Fatal(http.ListenAndServe(config.getAddress(), nil))
 }
 
 func (dp *DataPasser) mergeConnections() {
-	fmt.Println("Listening for new connections")
+	log.Println("Listening for new connections")
 
 	for {
 		select {
 		case Broadcast := <-dp.Broadcast:
 			err, c, _ := dp.find(Broadcast.clientKey)
-			fmt.Println(string(Broadcast.Message))
-			fmt.Println(err)
+			log.Println(string(Broadcast.Message))
+			log.Println(err)
 			err = c.server.WriteMessage(1, Broadcast.Message)
 			if err != nil {
 				return
@@ -172,14 +184,25 @@ func (dp *DataPasser) mergeConnections() {
 					}
 				}
 			}
-			fmt.Println("The current size of the connections is: ", len(dp.Connections))
-			fmt.Println("New connection received", conn.clientKey)
+			log.Println("The current size of the connections is: ", len(dp.Connections))
+			log.Println("New connection received", conn.clientKey)
 		}
 	}
 }
 
+// This holds the connection bewteen a client and a server.
 type ClientServer struct {
 	clientKey string
 	client    *websocket.Conn
 	server    *websocket.Conn
+}
+
+func (cs ClientServer) messageServer(message Broadcast) {
+	byte := message.Message
+	cs.server.WriteMessage(1, byte)
+}
+
+func (cs ClientServer) messageClient(message Broadcast) {
+	byte := message.Message
+	cs.client.WriteMessage(1, byte)
 }
